@@ -1,0 +1,13 @@
+permissions:
+  - role: "student"
+    tools:
+      - "get_schedule"
+      - "search_course"
+  - role: "teacher"
+    tools:
+      - "get_schedule"
+      - "search_course"
+      - "update_grade"
+  - role: "admin"
+    tools:
+      - "all"

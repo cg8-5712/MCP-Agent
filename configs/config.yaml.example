@@ -1,0 +1,32 @@
+server:
+  port: 8000
+  mode: "debug"                  # debug / release
+
+jwt:
+  secret: "change-me-in-production"
+  expire_hours: 24
+
+database:
+  driver: "sqlite"
+  dsn: "./data/mcp_agent.db"
+  # PostgreSQL 配置（如使用 postgres driver）
+  # host: "localhost"
+  # port: 5432
+  # user: "postgres"
+  # password: ""
+  # dbname: "mcp_agent"
+
+health_check:
+  interval_seconds: 30
+  timeout_seconds: 3
+
+log:
+  level: "info"
+
+mcp_servers:
+  - name: "course_server"
+    url: "http://localhost:8081"
+  - name: "notifications"
+    url: "http://localhost:8082"
+  - name: "admin_tools"
+    url: "http://localhost:8083"
