@@ -50,5 +50,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&model.User{},
 		&model.Tool{},
 		&model.CallLog{},
+		&model.ToolStats{},
 	)
 }

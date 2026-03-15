@@ -8,6 +8,7 @@ import (
 
 	"mcp-agent/internal/config"
 	"mcp-agent/internal/handler"
+	"mcp-agent/internal/health"
 	"mcp-agent/internal/middleware"
 	"mcp-agent/internal/permission"
 	"mcp-agent/internal/repository"
@@ -53,21 +54,29 @@ func main() {
 	userRepo := repository.NewUserRepository(db)
 	toolRepo := repository.NewToolRepository(db)
 	logRepo := repository.NewLogRepository(db)
+	statsRepo := repository.NewStatsRepository(db)
 
 	// 初始化 Services
 	authSvc := service.NewAuthService(userRepo, cfg.JWT)
-	toolSvc := service.NewToolService(toolRepo, logRepo)
+	toolSvc := service.NewToolService(toolRepo, logRepo, statsRepo)
 	healthSvc := service.NewHealthService(toolRepo, cfg.MCPServers, time.Duration(cfg.HealthCheck.TimeoutSeconds)*time.Second)
 	logSvc := service.NewLogService(logRepo)
+	statsSvc := service.NewStatsService(statsRepo)
 
 	// 初始化权限管理器
 	permManager := permission.NewManager("configs/permissions.yaml")
+
+	// 启动健康检查定时任务
+	healthChecker := health.NewChecker(healthSvc, statsRepo, time.Duration(cfg.HealthCheck.IntervalSeconds)*time.Second)
+	go healthChecker.Start()
+	defer healthChecker.Stop()
 
 	// 初始化 Handlers
 	authHandler := handler.NewAuthHandler(authSvc)
 	toolHandler := handler.NewToolHandler(toolSvc)
 	healthHandler := handler.NewHealthHandler(healthSvc)
 	logHandler := handler.NewLogHandler(logSvc)
+	statsHandler := handler.NewStatsHandler(statsSvc)
 
 	// 配置 Gin
 	if cfg.Server.Mode == "release" {
@@ -102,6 +111,10 @@ func main() {
 
 			// 工具健康检查
 			auth.GET("/tools/:name/health", healthHandler.CheckTool)
+
+			// 工具统计信息
+			auth.GET("/tools/:name/stats", statsHandler.GetToolStats)
+			auth.GET("/stats", statsHandler.ListAllStats)
 
 			// 管理员接口
 			admin := auth.Group("")

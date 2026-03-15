@@ -17,14 +17,16 @@ import (
 )
 
 type ToolService struct {
-	toolRepo *repository.ToolRepository
-	logRepo  *repository.LogRepository
+	toolRepo  *repository.ToolRepository
+	logRepo   *repository.LogRepository
+	statsRepo *repository.StatsRepository
 }
 
-func NewToolService(toolRepo *repository.ToolRepository, logRepo *repository.LogRepository) *ToolService {
+func NewToolService(toolRepo *repository.ToolRepository, logRepo *repository.LogRepository, statsRepo *repository.StatsRepository) *ToolService {
 	return &ToolService{
-		toolRepo: toolRepo,
-		logRepo:  logRepo,
+		toolRepo:  toolRepo,
+		logRepo:   logRepo,
+		statsRepo: statsRepo,
 	}
 }
 
@@ -114,6 +116,13 @@ func (s *ToolService) CallTool(name string, args map[string]interface{}, callerI
 		return nil, ErrToolDisabled
 	}
 
+	// Schema 校验
+	if tool.Schema != nil && len(tool.Schema) > 0 {
+		if err := s.validateSchema(tool.Schema, args); err != nil {
+			return nil, fmt.Errorf("schema validation failed: %w", err)
+		}
+	}
+
 	start := time.Now()
 
 	callLog := &model.CallLog{
@@ -129,6 +138,7 @@ func (s *ToolService) CallTool(name string, args map[string]interface{}, callerI
 	duration := time.Since(start).Milliseconds()
 
 	callLog.Duration = duration
+	success := callErr == nil
 	if callErr != nil {
 		callLog.StatusCode = 500
 		callLog.Error = callErr.Error()
@@ -142,10 +152,82 @@ func (s *ToolService) CallTool(name string, args map[string]interface{}, callerI
 		logger.Error("failed to save call log", zap.Error(logErr))
 	}
 
+	// 更新统计信息
+	if s.statsRepo != nil {
+		if err := s.statsRepo.IncrementCall(name, success, duration); err != nil {
+			logger.Error("failed to update stats", zap.Error(err))
+		}
+	}
+
 	if callErr != nil {
 		return nil, fmt.Errorf("%w: %s", ErrToolCallFailed, callErr.Error())
 	}
 	return result, nil
+}
+
+func (s *ToolService) validateSchema(schema map[string]interface{}, args map[string]interface{}) error {
+	properties, ok := schema["properties"].(map[string]interface{})
+	if !ok {
+		return nil
+	}
+
+	required, _ := schema["required"].([]interface{})
+	requiredFields := make(map[string]bool)
+	for _, field := range required {
+		if fieldName, ok := field.(string); ok {
+			requiredFields[fieldName] = true
+		}
+	}
+
+	for field := range requiredFields {
+		if _, exists := args[field]; !exists {
+			return fmt.Errorf("missing required field: %s", field)
+		}
+	}
+
+	for field, value := range args {
+		propSchema, exists := properties[field]
+		if !exists {
+			continue
+		}
+
+		propMap, ok := propSchema.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		expectedType, ok := propMap["type"].(string)
+		if !ok {
+			continue
+		}
+
+		actualType := getValueType(value)
+		if actualType != expectedType && expectedType != "any" {
+			return fmt.Errorf("field %s: expected type %s, got %s", field, expectedType, actualType)
+		}
+	}
+
+	return nil
+}
+
+func getValueType(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+	switch value.(type) {
+	case string:
+		return "string"
+	case float64, int, int64:
+		return "number"
+	case bool:
+		return "boolean"
+	case []interface{}:
+		return "array"
+	case map[string]interface{}:
+		return "object"
+	default:
+		return "unknown"
+	}
 }
 
 func (s *ToolService) doCall(tool *model.Tool, args map[string]interface{}) (interface{}, error) {
