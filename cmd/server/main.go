@@ -13,7 +13,10 @@ import (
 	"mcp-agent/internal/permission"
 	"mcp-agent/internal/repository"
 	"mcp-agent/internal/service"
+	"mcp-agent/pkg/embedding"
+	"mcp-agent/pkg/llm"
 	"mcp-agent/pkg/logger"
+	"mcp-agent/pkg/vectordb"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -56,12 +59,26 @@ func main() {
 	logRepo := repository.NewLogRepository(db)
 	statsRepo := repository.NewStatsRepository(db)
 
+	// 初始化 LLM 和 Embedding 客户端
+	llmClient := llm.NewClient(cfg.LLM)
+	embClient := embedding.NewClient(cfg.Embedding)
+
+	// 初始化向量数据库
+	var vectorDB vectordb.VectorDB
+	if cfg.VectorDB.UseMemory {
+		vectorDB = vectordb.NewMemoryVectorDB()
+		logger.Info("using in-memory vector database")
+	} else {
+		logger.Fatal("milvus vector database not implemented yet")
+	}
+
 	// 初始化 Services
 	authSvc := service.NewAuthService(userRepo, cfg.JWT)
 	toolSvc := service.NewToolService(toolRepo, logRepo, statsRepo)
 	healthSvc := service.NewHealthService(toolRepo, cfg.MCPServers, time.Duration(cfg.HealthCheck.TimeoutSeconds)*time.Second)
 	logSvc := service.NewLogService(logRepo)
 	statsSvc := service.NewStatsService(statsRepo)
+	agentSvc := service.NewAgentService(toolRepo, toolSvc, llmClient, embClient, vectorDB, *cfg)
 
 	// 初始化权限管理器
 	permManager := permission.NewManager("configs/permissions.yaml")
@@ -77,6 +94,7 @@ func main() {
 	healthHandler := handler.NewHealthHandler(healthSvc)
 	logHandler := handler.NewLogHandler(logSvc)
 	statsHandler := handler.NewStatsHandler(statsSvc)
+	agentHandler := handler.NewAgentHandler(agentSvc)
 
 	// 配置 Gin
 	if cfg.Server.Mode == "release" {
@@ -116,6 +134,10 @@ func main() {
 			auth.GET("/tools/:name/stats", statsHandler.GetToolStats)
 			auth.GET("/stats", statsHandler.ListAllStats)
 
+			// AI Agent 接口
+			auth.POST("/agent/execute", agentHandler.Execute)
+			auth.POST("/agent/search-tools", agentHandler.SearchTools)
+
 			// 管理员接口
 			admin := auth.Group("")
 			admin.Use(middleware.AdminOnly())
@@ -125,8 +147,15 @@ func main() {
 				admin.DELETE("/tools/:name", toolHandler.Delete)
 				admin.GET("/logs", logHandler.Query)
 				admin.POST("/auth/users", authHandler.CreateUser)
+				admin.POST("/agent/index-tools", agentHandler.IndexTools)
 			}
 		}
+	}
+
+	// 启动时索引工具
+	logger.Info("indexing tools for vector search")
+	if err := agentSvc.IndexTools(); err != nil {
+		logger.Error("failed to index tools", zap.Error(err))
 	}
 
 	// 启动服务

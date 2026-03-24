@@ -11,6 +11,9 @@ type Config struct {
 	HealthCheck HealthCheckConfig `mapstructure:"health_check"`
 	MCPServers  []MCPServerConfig `mapstructure:"mcp_servers"`
 	Log         LogConfig         `mapstructure:"log"`
+	LLM         LLMConfig         `mapstructure:"llm"`
+	Embedding   EmbeddingConfig   `mapstructure:"embedding"`
+	VectorDB    VectorDBConfig    `mapstructure:"vector_db"`
 }
 
 type ServerConfig struct {
@@ -41,6 +44,36 @@ type HealthCheckConfig struct {
 type MCPServerConfig struct {
 	Name string `mapstructure:"name"`
 	URL  string `mapstructure:"url"`
+}
+
+type LLMConfig struct {
+	Provider    string      `mapstructure:"provider"`
+	APIKey      string      `mapstructure:"api_key"`
+	BaseURL     string      `mapstructure:"base_url"`
+	Model       ModelConfig `mapstructure:"model"`
+	Temperature float64     `mapstructure:"temperature"`
+	MaxTokens   int         `mapstructure:"max_tokens"`
+}
+
+type ModelConfig struct {
+	Planner string `mapstructure:"planner"`
+	Final   string `mapstructure:"final"`
+}
+
+type EmbeddingConfig struct {
+	Provider  string `mapstructure:"provider"`
+	APIKey    string `mapstructure:"api_key"`
+	BaseURL   string `mapstructure:"base_url"`
+	Model     string `mapstructure:"model"`
+	Dimension int    `mapstructure:"dimension"`
+}
+
+type VectorDBConfig struct {
+	Provider   string `mapstructure:"provider"`
+	Host       string `mapstructure:"host"`
+	Port       int    `mapstructure:"port"`
+	Collection string `mapstructure:"collection"`
+	UseMemory  bool   `mapstructure:"use_memory"`
 }
 
 type LogConfig struct {
