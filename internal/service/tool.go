@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mcp-agent/internal/model"
+	"mcp-agent/internal/native"
 	"mcp-agent/internal/repository"
 	"mcp-agent/pkg/logger"
 
@@ -17,31 +18,38 @@ import (
 )
 
 type ToolService struct {
-	toolRepo  *repository.ToolRepository
-	logRepo   *repository.LogRepository
-	statsRepo *repository.StatsRepository
+	toolRepo      *repository.ToolRepository
+	logRepo       *repository.LogRepository
+	statsRepo     *repository.StatsRepository
+	nativeExec    *native.Executor
 }
 
 func NewToolService(toolRepo *repository.ToolRepository, logRepo *repository.LogRepository, statsRepo *repository.StatsRepository) *ToolService {
 	return &ToolService{
-		toolRepo:  toolRepo,
-		logRepo:   logRepo,
-		statsRepo: statsRepo,
+		toolRepo:   toolRepo,
+		logRepo:    logRepo,
+		statsRepo:  statsRepo,
+		nativeExec: native.NewExecutor(),
 	}
 }
 
 func (s *ToolService) Create(req model.CreateToolRequest) (*model.Tool, error) {
 	tool := &model.Tool{
-		Name:        req.Name,
-		Description: req.Description,
-		ServerName:  req.ServerName,
-		ServerURL:   req.ServerURL,
-		Schema:      req.Schema,
-		Enabled:     true,
-		Version:     req.Version,
+		Name:         req.Name,
+		Description:  req.Description,
+		ServerName:   req.ServerName,
+		ServerURL:    req.ServerURL,
+		Schema:       req.Schema,
+		Enabled:      true,
+		Version:      req.Version,
+		ToolType:     req.ToolType,
+		NativeConfig: req.NativeConfig,
 	}
 	if tool.Version == "" {
 		tool.Version = "1.0.0"
+	}
+	if tool.ToolType == "" {
+		tool.ToolType = model.ToolTypeRemote
 	}
 	if err := s.toolRepo.Create(tool); err != nil {
 		return nil, err
@@ -231,6 +239,20 @@ func getValueType(value interface{}) string {
 }
 
 func (s *ToolService) doCall(tool *model.Tool, args map[string]interface{}) (interface{}, error) {
+	switch tool.ToolType {
+	case model.ToolTypeNative:
+		return s.nativeExec.Execute(tool, args)
+	case model.ToolTypeCustom:
+		if tool.ServerURL == "" {
+			return nil, fmt.Errorf("custom tool %q has no server_url", tool.Name)
+		}
+		return s.doRemoteCall(tool, args)
+	default: // ToolTypeRemote or empty
+		return s.doRemoteCall(tool, args)
+	}
+}
+
+func (s *ToolService) doRemoteCall(tool *model.Tool, args map[string]interface{}) (interface{}, error) {
 	body, err := json.Marshal(args)
 	if err != nil {
 		return nil, err
